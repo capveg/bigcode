@@ -161,6 +161,30 @@ void handle_sigusr1(int ignore)
     signal( SIGUSR1, handle_sigusr1);
 }
 
+/*****
+ * equivalent of `echo 1 > /proc/sys/net/ipv4/ip_forwarding`
+ * assumes we're running with NETCAP perms
+ */
+
+int
+ip_forwarding_enable() {
+    int len;
+    #define IPFWD "/proc/sys/net/ipv4/ip_forward"
+    FILE * f = fopen(IPFWD,"w");
+    if (f == NULL) {
+        orc_err("Error trying to open " IPFWD " :  %d: %s", errno, strerror(errno));
+        return -1;
+    }
+    orc_log("Setting " IPFWD " to '1'\n");
+    len = fprintf(f,"1\n");
+    if (len < 0) {
+        orc_err("Error trying to set " IPFWD " to 1: %d: %s", errno, strerror(errno));
+        return len;
+    }
+    fclose(f);
+    return 0;
+}
+
 
 /**
  * Callback for the editline server:
@@ -262,6 +286,7 @@ orc_main(int argc, char * argv[])
         els_start(options.els);     // start cli if configured
         els_prompt(options.els);
     }
+    ip_forwarding_enable();
     return run_driver(&options, argc, argv);
 }
 
