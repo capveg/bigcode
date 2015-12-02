@@ -132,6 +132,8 @@ int pending_next_hop_lookup(
  *
  * @param[in]   db -- as initialized by next_hop_db_create()
  * @param[in]   next_hop_ip -- an ipv4 address
+ * @param[in]   l3_intf_id -- the index of the L3 interface
+ * @param[in]   next_hop_hw_mac -- the mac address of the next hop's interface
  * @param[out] next_hop_id is populated with the valid next_hop_id if 1 is returned, else undefined
  *
  * @return 1 if found, 0 if not
@@ -140,7 +142,9 @@ int pending_next_hop_lookup(
 int next_hop_add(
        next_hop_db * db,
        u32 next_hop_ip,
-       l3_next_hop_id_t next_hop_id
+       l3_next_hop_id_t next_hop_id,
+       l3_intf_id_t l3_intf_id,
+       u8 next_hop_hw_mac[6]
        );
 
 int next_hop_del(
@@ -151,7 +155,9 @@ int next_hop_del(
 int next_hop_lookup(
        next_hop_db * db,
        u32 next_hop_ip,
-       l3_next_hop_id_t * next_hop_id
+       l3_next_hop_id_t * next_hop_id,
+       l3_intf_id_t * l3_intf_id,
+       u8 next_hop_hw_mac[6]
        );
 
 int unittest_next_hop(void);

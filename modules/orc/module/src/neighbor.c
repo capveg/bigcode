@@ -73,6 +73,8 @@ typedef struct pending_next_hop_s {
 typedef struct next_hop_entry_s {
     u32 next_hop_ip;
     l3_next_hop_id_t next_hop_id;
+    u8 next_hop_hw_mac[6];
+    l3_intf_id_t l3_intf_id;
     struct next_hop_entry_s * next;
 } next_hop_entry_t;
 
@@ -395,7 +397,9 @@ int pending_next_hop_lookup(
 int next_hop_add(
         next_hop_db * db,
         u32 next_hop_ip,
-        l3_next_hop_id_t next_hop_id)
+        l3_next_hop_id_t next_hop_id,
+        l3_intf_id_t l3_intf_id,
+        u8 next_hop_hw_mac[6])
 {
     next_hop_entry_t * curr;
     curr = db->nh_head;
@@ -414,6 +418,8 @@ int next_hop_add(
     }
     curr->next_hop_ip = next_hop_ip;
     curr->next_hop_id = next_hop_id;
+    curr->l3_intf_id = l3_intf_id;
+    memcpy(curr->next_hop_hw_mac , next_hop_hw_mac,6);
     curr->next = db->nh_head;   // add to front of list
     db->nh_head = curr;
 
@@ -464,7 +470,9 @@ int next_hop_del(
 int next_hop_lookup(
         next_hop_db *db,
         u32 next_hop_ip,
-        l3_next_hop_id_t * next_hop_id
+        l3_next_hop_id_t * next_hop_id,
+        l3_intf_id_t * l3_intf_id,
+        u8 next_hop_hw_mac[6]
         )
 {
     next_hop_entry_t * curr;
@@ -474,6 +482,8 @@ int next_hop_lookup(
         if (curr->next_hop_ip == next_hop_ip)
         {
             *next_hop_id = curr->next_hop_id;
+            *l3_intf_id = curr->l3_intf_id;
+            memcpy(next_hop_hw_mac , curr->next_hop_hw_mac,6);
             return 1;
         }
         curr = curr->next;
@@ -486,25 +496,27 @@ int unittest_next_hop(void)
 {
     next_hop_db *db;
     l3_next_hop_id_t test_id;
+    u8 hw_mac[6];
+    l3_intf_id_t l3_intf_id = 0;
     u32 ip1 = 1; l3_next_hop_id_t id1 = 1;
     u32 ip2 = 2; l3_next_hop_id_t id2 = 2;
     u32 ip3 = 3; l3_next_hop_id_t id3 = 3;
 
     TEST("NH_DB_INIT", assert(next_hop_db_init(&db) == 0));
-    TEST("NH_ADD1", assert(next_hop_add(db, ip1, id1) == 0));
-    TEST("NH_ADD1_DUP", assert(next_hop_add(db, ip1, id1) == 1));
-    TEST("NH_LOOKUP1", assert(next_hop_lookup(db, ip1, &test_id) == 1));
+    TEST("NH_ADD1", assert(next_hop_add(db, ip1, id1, l3_intf_id, hw_mac) == 0));
+    TEST("NH_ADD1_DUP", assert(next_hop_add(db, ip1, id1,  l3_intf_id, hw_mac) == 1));
+    TEST("NH_LOOKUP1", assert(next_hop_lookup(db, ip1, &test_id,  &l3_intf_id, hw_mac) == 1));
     TEST("NH_LOOKUP1-verify", assert(test_id == id1));
-    TEST("NH_ADD2", assert(next_hop_add(db, ip2, id2) == 0));
-    TEST("NH_LOOKUP2", assert(next_hop_lookup(db, ip2, &test_id) == 1));
+    TEST("NH_ADD2", assert(next_hop_add(db, ip2, id2,  l3_intf_id, hw_mac) == 0));
+    TEST("NH_LOOKUP2", assert(next_hop_lookup(db, ip2, &test_id, &l3_intf_id, hw_mac) == 1));
     TEST("NH_LOOKUP2-verify", assert(test_id == id2));
 
     TEST("NH_DEL2", assert(next_hop_del(db, ip2) == 0));
     TEST("NH_DEL2-DUP", assert(next_hop_del(db, ip2) == 1));
-    TEST("NH_LOOKUP2_FAIL", assert(next_hop_lookup(db, ip2, &test_id) == 0));
+    TEST("NH_LOOKUP2_FAIL", assert(next_hop_lookup(db, ip2, &test_id,  &l3_intf_id, hw_mac) == 0));
 
-    TEST("NH_ADD3", assert(next_hop_add(db, ip3, id3) == 0));
-    TEST("NH_LOOKUP1b", assert(next_hop_lookup(db, ip1, &test_id) == 1));
+    TEST("NH_ADD3", assert(next_hop_add(db, ip3, id3, l3_intf_id, hw_mac) == 0));
+    TEST("NH_LOOKUP1b", assert(next_hop_lookup(db, ip1, &test_id,  &l3_intf_id, hw_mac) == 1));
     TEST("NH_LOOKUP1b-verify", assert(test_id == id1));
 
     TEST("NH_DB_FREE", assert(next_hop_db_free(db) == 0));

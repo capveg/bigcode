@@ -27,6 +27,7 @@
  *
  ***********************************************************/
 
+#include <assert.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -44,8 +45,8 @@
 #include "orc/tap_utils.h"
 #include "orc/utils.h"
 
-#ifndef MAX_NEXT_HOPS
-#define MAX_NEXT_HOPS 256       /* used with pending_next_hop_lookup() */
+#ifndef MAX_NEW_ROUTES
+#define MAX_NEW_ROUTES 65536       /* used with pending_next_hop_lookup() */
 #endif
 
 next_hop_db * Next_Hop_DB = NULL;
@@ -80,6 +81,26 @@ call_add_l3_v4_route(
 }
 
 int
+call_del_l3_v4_route(
+        orc_options_t * options,
+        u32 ip_dst,
+        u32 netmask,
+        l3_next_hop_id_t next_hop_id)
+{
+    int err;
+    orc_debug("Calling driver del_l3_v4_route(dst="IPV4_FORMAT",netmask="
+            IPV4_FORMAT",next_hop=%d)\n",
+            IPV4_ADDR_PRINT(ip_dst),
+            IPV4_ADDR_PRINT(netmask),
+            next_hop_id
+           );
+    err = options->drv->del_l3_v4_route(ip_dst, netmask, next_hop_id);
+    if (err)
+        orc_err("call_del_l3_v4_route() returned %d\n", err);
+    return err;
+}
+
+int
 call_add_l3_v4_next_hop(
         orc_options_t * options,
         port_t * port,
@@ -96,6 +117,19 @@ call_add_l3_v4_next_hop(
             l3_intf_id,
             ETH_ADDR_PRINT(next_hop_hw_mac),
             *l3_next_hop_id);
+    if (err)
+        orc_err("options->drv->add_l3_next_hop() returned %d\n", err);
+    return err;
+}
+
+int
+call_del_l3_v4_next_hop(
+        orc_options_t * options,
+        l3_intf_id_t l3_intf_id)                    /* egress interface */
+{
+    int err;
+    err = options->drv->del_l3_next_hop( l3_intf_id);
+    orc_debug("Called driver del_l3_next_hop(idx=%d)\n", l3_intf_id);
     if (err)
         orc_err("options->drv->del_l3_next_hop() returned %d\n", err);
     return err;
@@ -393,6 +427,8 @@ static int handle_v4_route(
     char buf[BUFLEN];
     char intfnam[IFNAMSIZ];
     l3_next_hop_id_t next_hop;
+    l3_intf_id_t l3_intf_id;
+    u8 next_hop_mac[6];
     u32 netmask;
     orc_v4_route_t entry;
 
@@ -422,10 +458,13 @@ static int handle_v4_route(
             entry.dst_if_index);
 
     netmask = ~((1<<(32-entry.dst_mask_len))-1);
-    if (next_hop_lookup( Next_Hop_DB, entry.gateway, &next_hop))
+    if ( next_hop_lookup( Next_Hop_DB, entry.gateway, &next_hop, 
+                &l3_intf_id, next_hop_mac))
     {
-        orc_debug("Found next_hop_id=%d for gateway " IPV4_FORMAT "\n",
-                    next_hop, IPV4_ADDR_PRINT(entry.gateway));
+        orc_debug("Found next_hop_id=%d for gateway " IPV4_FORMAT 
+                "(mac: " ETH_FORMAT "i,intf=%d)\n",
+                    next_hop, IPV4_ADDR_PRINT(entry.gateway),
+                    ETH_ADDR_PRINT(next_hop_mac), l3_intf_id);
     }
     else
         next_hop = NEXT_HOP_KERNEL; /** software forward until we learn
@@ -616,10 +655,13 @@ int handle_v4_neighbor(
     char intfnam[IFNAMSIZ];
     orc_v4_neighbor_t neigh;
     l3_next_hop_id_t next_hop_id;
+    l3_intf_id_t next_hop_l3_intf_id;
+    u8 next_hop_mac[6];
     int err, i;
-    u32 route_ips[MAX_NEXT_HOPS];
-    u32 route_netmasks[MAX_NEXT_HOPS];
-    int n_next_hops = MAX_NEXT_HOPS;
+    u32 route_ips[MAX_NEW_ROUTES];
+    u32 route_netmasks[MAX_NEW_ROUTES];
+    int n_routes = MAX_NEW_ROUTES;
+    int update_routes = 0;  /* have we changed next_hops, so need to update route table? */
 
     int success = parse_v4_neighbor(options, nl_msg, &neigh);
     if (success == 0)
@@ -644,15 +686,17 @@ int handle_v4_neighbor(
             interface_index_to_name(neigh.if_index, intfnam, IFNAMSIZ),
             neigh.if_index);
 
-    if (next_hop_lookup(Next_Hop_DB, neigh.ip, &next_hop_id) == 0)
+    if (next_hop_lookup(Next_Hop_DB, neigh.ip, &next_hop_id,
+                &next_hop_l3_intf_id, next_hop_mac) == 0)
         next_hop_id = NEXT_HOP_KERNEL; /* no next_hop_id allocated yet */
+
 
     if (pending_next_hop_lookup(
             Next_Hop_DB,
             neigh.ip,
             route_ips,
             route_netmasks,
-            &n_next_hops
+            &n_routes
             ) == -1)
     {
         orc_warn("pending_next_hop_lookup() returned an error\n");
@@ -661,22 +705,13 @@ int handle_v4_neighbor(
 
     if (opp == OP_ADD)
     {
-        /* create a next_hop_id if none exists */
-        if (next_hop_id == NEXT_HOP_KERNEL)
-        {
-            port_t *port = interface_index_to_port_t(neigh.if_index);
-            if ( port == NULL)
-            {
-                orc_err("Failed to find port_t structure from this"
-                        " route's if_index=%d\n", neigh.if_index);
-                return -1;
-            }
-            call_add_l3_v4_next_hop(options,
-                    port,
-                    port->l3_intf_id,
-                    neigh.mac,
-                    & next_hop_id);
-            next_hop_add(Next_Hop_DB, neigh.ip, next_hop_id);
+        port_t *port = interface_index_to_port_t(neigh.if_index);
+        if ( port == NULL) {
+            orc_trace("Failed to find port_t structure from this"
+                    " route's if_index=%d\n", neigh.if_index);
+            return -1;
+        }
+        if (next_hop_id == NEXT_HOP_KERNEL) {
             orc_log("%s new IPv4 Neighbor %s --> " IPV4_FORMAT
                     " on %s idx=%d : next_hop_id=%d\n",
                     ((opp == OP_ADD)? "Adding" : "Deleting"),
@@ -684,10 +719,50 @@ int handle_v4_neighbor(
                     IPV4_ADDR_PRINT(neigh.ip),
                     interface_index_to_name(neigh.if_index, intfnam, IFNAMSIZ),
                     neigh.if_index, next_hop_id);
+            call_add_l3_v4_next_hop(options,
+                    port,
+                    port->l3_intf_id,
+                    neigh.mac,
+                    & next_hop_id);
+            next_hop_add(Next_Hop_DB, neigh.ip, next_hop_id, port->l3_intf_id, neigh.mac);
+        } else {
+            /* else, verify our nh information matches and update if not */
+            port_t * port = interface_index_to_port_t(neigh.if_index);
+            port_t * old_port = l3_interface_index_to_port_t(next_hop_l3_intf_id);
+            assert(old_port);   /* should never have an l3_intf_id without a corresponding port */
+            if (port != NULL) {
+                if ( memcmp(next_hop_mac, neigh.mac,6) || 
+                                next_hop_l3_intf_id != port->l3_intf_id ) {
+                    orc_log("updating next_hop for "IPV4_FORMAT" from " ETH_FORMAT
+                            "@%s to "ETH_FORMAT"@%s\n",
+                            IPV4_ADDR_PRINT(neigh.ip),
+                            ETH_ADDR_PRINT(next_hop_mac), old_port->name,
+                            ETH_ADDR_PRINT(neigh.mac), 
+                            interface_index_to_name(neigh.if_index, intfnam, IFNAMSIZ));
+                    update_routes = 1;
+                    call_del_l3_v4_next_hop(options, next_hop_id);
+                    next_hop_del(Next_Hop_DB, neigh.ip);
+                    call_add_l3_v4_next_hop(options,
+                            port,
+                            port->l3_intf_id,
+                            neigh.mac,
+                            & next_hop_id);     /* update next_hop_id with new value */
+                    next_hop_add(Next_Hop_DB, neigh.ip, next_hop_id, port->l3_intf_id, neigh.mac);
+                }
+            }
         }
         /* update each route with the newly allocated next_hop_id */
-        for (i = 0; i < n_next_hops; i++)
+        for (i = 0; i < n_routes; i++)
         {
+            if (update_routes) {
+                if ((err = call_del_l3_v4_route(options,
+                                route_ips[i],
+                                route_netmasks[i],
+                                next_hop_id
+                                )) == -1) {
+                    continue;
+                }
+            }
             if ( (neigh.ip & route_netmasks[i]) == route_ips[i])
             {
                 /* this is a direct attach/host route -- insert a /32 */
@@ -725,7 +800,7 @@ int handle_v4_neighbor(
             }
         }
         /* now delete each route that depended on this next_hop */
-        for (i =0; i < n_next_hops; i++)
+        for (i =0; i < n_routes; i++)
         {
             if ( (neigh.ip & route_netmasks[i]) == route_ips[i])
             {

@@ -65,6 +65,7 @@ char * interface_index_to_name(int index, char * buf, int buflen);
  * Lookup a port_t structure from its underlying Linux interface index
  */
 port_t * interface_index_to_port_t(int index);
+port_t * l3_interface_index_to_port_t(l3_intf_id_t l3_intf_id);
 
 /***
  * Lookup an interface's MAC address from its underlying Linux interface index

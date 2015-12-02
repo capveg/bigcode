@@ -244,6 +244,21 @@ port_t * interface_index_to_port_t(int index)
     return NULL;
 }
 
+port_t * l3_interface_index_to_port_t(l3_intf_id_t l3_intf_id)
+{
+    int i;
+    // FIXME: linear search!
+    // foreach if_index that we've seen
+    for (i=0; i<Driver_Index_Linux_Max_Index; i++)
+    {
+        /* NOTE: map == NULL if this is not an ORC interface */
+        if (Driver_Index_Linux_Index_Map[i] != NULL &&
+                Driver_Index_Linux_Index_Map[i]->l3_intf_id == l3_intf_id)
+            return Driver_Index_Linux_Index_Map[i];
+    }
+    return NULL;
+}
+
 int interface_name_to_hw_mac(char name[IFNAMSIZ], u8 hw_mac[6])
 {
     struct ifreq ifr;
