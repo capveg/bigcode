@@ -661,7 +661,6 @@ int handle_v4_neighbor(
     u32 route_ips[MAX_NEW_ROUTES];
     u32 route_netmasks[MAX_NEW_ROUTES];
     int n_routes = MAX_NEW_ROUTES;
-    int update_routes = 0;  /* have we changed next_hops, so need to update route table? */
 
     int success = parse_v4_neighbor(options, nl_msg, &neigh);
     if (success == 0)
@@ -689,7 +688,6 @@ int handle_v4_neighbor(
     if (next_hop_lookup(Next_Hop_DB, neigh.ip, &next_hop_id,
                 &next_hop_l3_intf_id, next_hop_mac) == 0)
         next_hop_id = NEXT_HOP_KERNEL; /* no next_hop_id allocated yet */
-
 
     if (pending_next_hop_lookup(
             Next_Hop_DB,
@@ -739,9 +737,17 @@ int handle_v4_neighbor(
                             ETH_ADDR_PRINT(next_hop_mac), old_port->name,
                             ETH_ADDR_PRINT(neigh.mac), 
                             interface_index_to_name(neigh.if_index, intfnam, IFNAMSIZ));
-                    update_routes = 1;
+                    /* delete the old routes ... */
+                    for (i = 0; i < n_routes; i++)
+                            call_del_l3_v4_route(options,
+                                            route_ips[i],
+                                            route_netmasks[i],
+                                            next_hop_id
+                                            );
+                    /* ... before removing the old nh entry */
                     call_del_l3_v4_next_hop(options, next_hop_id);
                     next_hop_del(Next_Hop_DB, neigh.ip);
+                    /* And create the new nh indexx */
                     call_add_l3_v4_next_hop(options,
                             port,
                             port->l3_intf_id,
@@ -754,15 +760,6 @@ int handle_v4_neighbor(
         /* update each route with the newly allocated next_hop_id */
         for (i = 0; i < n_routes; i++)
         {
-            if (update_routes) {
-                if ((err = call_del_l3_v4_route(options,
-                                route_ips[i],
-                                route_netmasks[i],
-                                next_hop_id
-                                )) == -1) {
-                    continue;
-                }
-            }
             if ( (neigh.ip & route_netmasks[i]) == route_ips[i])
             {
                 /* this is a direct attach/host route -- insert a /32 */
@@ -789,17 +786,7 @@ int handle_v4_neighbor(
             }
         }
     } else {    /* opp == OP_DEL */
-        if (next_hop_id != NEXT_HOP_KERNEL)
-        {
-            /* remove old next hop id */
-            next_hop_del(Next_Hop_DB, next_hop_id);
-            if ((err = options->drv->del_l3_next_hop(next_hop_id)) == -1)
-            {
-                orc_err("options->drv->del_l3_next_hop() returned -1\n");
-                return -1;
-            }
-        }
-        /* now delete each route that depended on this next_hop */
+        /* first delete each route that depended on this next_hop */
         for (i =0; i < n_routes; i++)
         {
             if ( (neigh.ip & route_netmasks[i]) == route_ips[i])
@@ -816,21 +803,32 @@ int handle_v4_neighbor(
                 }
             } else {
                 /* this is a gateway route -- replace fast path route with slow */
-                /* this assumes that this route will overwrite the
-                 * a pre-existing route in the driver, if it exists */
                 /* this happens when the ARP entry for the next hop gateway
                  * has timed out so we insert a slow path route so that when
                  * a new packet wants to traverse this route, the linux kernel
                  * will arp for it and then we will re-insert the fast path route
                  */
-                if ((err = call_add_l3_v4_route(options,
+                call_del_l3_v4_route(options,
+                                route_ips[i],
+                                route_netmasks[i],
+                                next_hop_l3_intf_id
+                                );
+                call_add_l3_v4_route(options,
                         route_ips[i],
                         route_netmasks[i],
                         NEXT_HOP_KERNEL
-                        )) == -1)
-                {
-                    continue;
-                }
+                        );
+            }
+        }
+        /* then remove the nh entry if it's specified  */
+        if (next_hop_id != NEXT_HOP_KERNEL)
+        {
+            /* remove old next hop id */
+            next_hop_del(Next_Hop_DB, next_hop_id);
+            if ((err = options->drv->del_l3_next_hop(next_hop_id)) == -1)
+            {
+                orc_err("options->drv->del_l3_next_hop() returned -1\n");
+                return -1;
             }
         }
     }
