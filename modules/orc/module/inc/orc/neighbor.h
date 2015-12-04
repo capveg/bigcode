@@ -86,15 +86,10 @@ int pending_next_hop_add_direct(next_hop_db * db,
  * Del this pending next hop to the DB
  */
 
-int pending_next_hop_del_gateway(next_hop_db * db,
-        u32 gateway_ip,
+int pending_next_hop_del(
+        next_hop_db *db,
         u32 route_ip,
-        u32 route_netmask
-        );
-int pending_next_hop_del_direct(next_hop_db * db,
-        u32 route_ip,
-        u32 route_netmask
-        );
+        u32 route_netmask);
 
 /**
  * Lookup in the pending db to see if we have a route waiting on

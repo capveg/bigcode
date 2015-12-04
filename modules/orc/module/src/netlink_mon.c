@@ -509,39 +509,28 @@ static int handle_v4_route(
     }
     else    /* opp == OP_DEL  */
     {
-        if (entry.gateway_valid)
+
+        orc_debug("Calling drv->del_l3_v4_route(" IPV4_FORMAT "/"
+                IPV4_FORMAT",next_hop=%d)\n",
+                IPV4_ADDR_PRINT(entry.dst_ip),
+                IPV4_ADDR_PRINT(netmask),
+                next_hop
+                );
+        /* call the driver to delete the route
+         * FIXME: it may not be installed and this will fail harmlessly
+         * but in a noisy way */
+        options->drv->del_l3_v4_route(
+                entry.dst_ip,
+                netmask,
+                next_hop
+                );
+        /* delete the pending next_hop */
+        if ((err = pending_next_hop_del(
+                        Next_Hop_DB,
+                        entry.dst_ip,
+                        netmask)) != 0)
         {
-            orc_debug("Calling drv->del_l3_v4_route(" IPV4_FORMAT "/"
-                    IPV4_FORMAT",next_hop=%d)\n",
-                    IPV4_ADDR_PRINT(entry.dst_ip),
-                    IPV4_ADDR_PRINT(netmask),
-                    next_hop
-                );
-            /* call the driver to delete the route */
-            options->drv->del_l3_v4_route(
-                    entry.dst_ip,
-                    netmask,
-                    next_hop
-                );
-            /* delete the pending next_hop */
-            if ((err = pending_next_hop_del_gateway(
-                    Next_Hop_DB,
-                    entry.gateway,
-                    entry.dst_ip,
-                    netmask)) != 0)
-            {
-                orc_debug("pending_next_hop_del_gateway() failed: %d\n",
-                        err);
-            }
-        } else {    /* direct route */
-            if ((err = pending_next_hop_del_direct(
-                    Next_Hop_DB,
-                    entry.dst_ip,
-                    netmask)) != 0)
-            {
-                orc_debug("pending_next_hop_del_gateway() failed: %d\n",
-                        err);
-            }
+            orc_debug("pending_next_hop_del() failed: %d\n", err);
         }
     }
 

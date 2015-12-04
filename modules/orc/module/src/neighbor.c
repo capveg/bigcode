@@ -93,10 +93,6 @@ typedef struct next_hop_db_s {
  * Forward declarations
  */
 
-static int pending_next_hop_del(
-        next_hop_db *db,
-        u32 route_ip,
-        u32 route_netmask);
 static int pending_next_hop_cmp(
         u32 ip_a,
         u32 netmask_a,
@@ -200,7 +196,7 @@ static int pending_next_hop_entry_free(pending_next_hop_t * entry)
 /**
  * Remove this entry from the linked list
  */
-static int pending_next_hop_del(
+int pending_next_hop_del(
         next_hop_db *db,
         u32 route_ip,
         u32 route_netmask)
@@ -229,20 +225,6 @@ static int pending_next_hop_del(
     return 0;
 }
 
-int pending_next_hop_del_gateway(next_hop_db *db,
-        u32 gateway_ip,
-        u32 route_ip,
-        u32 route_netmask)
-{
-    return pending_next_hop_del(db, route_ip, route_netmask);
-}
-
-int pending_next_hop_del_direct(next_hop_db *db,
-        u32 route_ip,
-        u32 route_netmask)
-{
-    return pending_next_hop_del(db, route_ip, route_netmask);
-}
 
 /***
  * A comparison function between two CIDR masks.
